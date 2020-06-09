@@ -23,6 +23,7 @@
 #else
 #include <cstdlib>
 #include <stdio.h>
+#include <unistd.h>
 #endif
 #include "bridge.h"
 /*
@@ -87,7 +88,7 @@ int main(int argc, char** argv)
 #else
 	strcpy(path, "");
 #endif
-	// Load STLinkUSBDriver library 
+	// Load STLinkUSBDriver library
 	// In this example STLinkUSBdriver (dll on windows) must be copied near test executable
 	ifStat = m_pStlinkIf->LoadStlinkLibrary(path);
 	if( ifStat!=STLINKIF_NO_ERR ) {
@@ -190,73 +191,70 @@ int main(int argc, char** argv)
 		}
 	}
 
-	// I2C Test
-	if (brgStat == BRG_NO_ERR)
-	{
-		printf("I2C test start\n");
-		Brg_I2cInitT i2cParam;
-		int freqKHz = 400; //400KHz
-		uint32_t timingReg; 
-		int riseTimeNs, fallTimeNs, DNF;
-		bool analogFilter;
-		uint16_t sizeWithoutErr =0;
-		uint8_t dataRx[3072], dataTx[3072]; //max size must be aligned with target buffer
-		uint16_t i2cSlaveAddr = 0x64>>1;// convert to 7bit address
 
-		// I2C_FAST freqKHz: 1-400KHz I2C_FAST_PLUS: 1-1000KHz
-		riseTimeNs = 0; //0-300ns
-		fallTimeNs = 0; //0-300ns
-		DNF = 0; // digital filter OFF
-		analogFilter = true;
 
-		brgStat = m_pBrg->GetI2cTiming(I2C_FAST, freqKHz, DNF, riseTimeNs, fallTimeNs, analogFilter, &timingReg);
-		// example I2C_STANDARD, I2C input CLK= 192MHz, rise/fall time (ns) = 0, analog filter on, dnf=0
-		// I2C freq = 400KHz timingReg = 0x20602274
-		if( brgStat == BRG_NO_ERR ) {
-			i2cParam.TimingReg = timingReg;
-			i2cParam.OwnAddr = 0;// 0  unused in I2C master mode
-			i2cParam.AddrMode = I2C_ADDR_7BIT;
-			i2cParam.AnFilterEn = I2C_FILTER_ENABLE;
-			i2cParam.DigitalFilterEn = I2C_FILTER_DISABLE;
-			i2cParam.Dnf = (uint8_t)DNF; //0
-			brgStat = m_pBrg->InitI2C(&i2cParam);
-		} else {
-				printf("I2C timing error, timing reg: 0x%08x\n", timingReg);
+	if (brgStat == BRG_NO_ERR) {
+		printf("GPIO test start\n");
+
+
+		Brg_StatusT BrgStatus = BRG_NO_ERR;
+		Brg_GpioInitT gpioParams;
+		Brg_GpioConfT gpioConf[BRG_GPIO_MAX_NB];
+		Brg_GpioValT gpioWriteVal[BRG_GPIO_MAX_NB];
+		uint8_t gpioMsk=0, gpioErrMsk;
+
+		int i;
+		gpioMsk = BRG_GPIO_ALL;
+		gpioParams.GpioMask = gpioMsk; // BRG_GPIO_0 1 2 3
+		gpioParams.ConfigNb = BRG_GPIO_MAX_NB; //must be BRG_GPIO_MAX_NB or 1 (if 1 pGpioConf[0] used for all gpios)
+		gpioParams.pGpioConf = &gpioConf[0];
+		for(i=0; i<BRG_GPIO_MAX_NB; i++) {
+			gpioConf[i].Mode = GPIO_MODE_OUTPUT; // GPIO_MODE_INPUT GPIO_MODE_OUTPUT GPIO_MODE_ANALOG
+			gpioConf[i].Speed = GPIO_SPEED_MEDIUM; // GPIO_SPEED_LOW GPIO_SPEED_MEDIUM GPIO_SPEED_HIGH GPIO_SPEED_VERY_HIGH
+			gpioConf[i].Pull = GPIO_PULL_UP; // GPIO_NO_PULL GPIO_PULL_UP GPIO_PULL_DOWN
+			gpioConf[i].OutputType = GPIO_OUTPUT_PUSHPULL; // GPIO_OUTPUT_PUSHPULL GPIO_OUTPUT_OPENDRAIN
+			printf("conf: %d\n", i);
+		}
+		BrgStatus = m_pBrg->InitGPIO(&gpioParams);
+		if( BrgStatus != BRG_NO_ERR ) {
+			printf("Bridge Gpio init failed (mask=%d, gpio0: mode= %d, pull = %d, ...)\n",(int)gpioParams.GpioMask, (int)gpioConf[0].Mode, (int)gpioConf[0].Pull);
 		}
 
-		// 1- send 2 bytes : 1 byte regist address,1 byte data
-		dataTx[0] = 0xff;// register address
-		dataTx[1] = 0x60;// data
-		brgStat = m_pBrg->WriteI2C(dataTx, i2cSlaveAddr, 2, &sizeWithoutErr);
-		// or brgStat = m_pBrg->WriteI2C((uint8_t*)&txSize, I2C_7B_ADDR(_i2cSlaveAddr), 4, &sizeWithoutErr);
-		if( brgStat != BRG_NO_ERR ) {
-			printf("BRG Write data size error (sent %d instead of 2)\n", (int)sizeWithoutErr);
-		}else{
-			printf("write reg 0xff sucess\n");
-		}
-
-		// 2-send to read regist address
-		dataTx[0] = 0x00;// read regist address
-		brgStat = m_pBrg->WriteI2C(dataTx, i2cSlaveAddr, 1, &sizeWithoutErr);
-		if( brgStat != BRG_NO_ERR ) {
-			printf("BRG Write data size error (sent %d instead of 4)\n", (int)sizeWithoutErr);
-		}
-		// 3- read 4bytes data
-		if( brgStat == BRG_NO_ERR ) {
-			sizeWithoutErr = 0;
-			brgStat = m_pBrg->ReadI2C(dataRx, i2cSlaveAddr, 4, &sizeWithoutErr);
-			if( brgStat != BRG_NO_ERR ) {
-				printf("BRG Read back data size error (read %d instead of 4)\n", (int)sizeWithoutErr);
-			} else {
-				for (int i = 0; i < 4; i++)
-				{
-					printf("reg value is : 0x%02x\n", dataRx[i]);
+		while (1) {
+			for (int i=0; i<BRG_GPIO_MAX_NB; i++) {
+				gpioWriteVal[i] = GPIO_SET;
+				BrgStatus = m_pBrg->SetResetGPIO(gpioMsk, &gpioWriteVal[i], &gpioErrMsk);
+				if (brgStat != BRG_NO_ERR) {
+					printf("error: %d\n", i);
 				}
+				usleep(1000);
 			}
+
+			printf("set\n");
+			sleep(3);
+
+			for (int i=0; i<BRG_GPIO_MAX_NB; i++) {
+				gpioWriteVal[i] = GPIO_RESET;
+				BrgStatus = m_pBrg->SetResetGPIO(gpioMsk, &gpioWriteVal[i], &gpioErrMsk);
+				if (brgStat != BRG_NO_ERR) {
+					printf("error: %d\n", i);
+				}
+
+				usleep(1000);
+			}
+			printf("reset\n");
+			sleep(3);
 		}
 
-		printf("I2C test end\n");
-	}	
+
+		if( BrgStatus == BRG_NO_ERR ) {
+			printf("GPIO Test OK \n");
+		}
+
+		brgStat = m_pBrg->CloseBridge(COM_GPIO);
+
+		printf("GPIOtest end\n");
+	}
 
 	// Disconnect
 	if( m_pBrg!=NULL ) {
