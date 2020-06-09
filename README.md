@@ -2,4 +2,4 @@
 STLINK-V3SET GPIO APIs Demo
 
 this demo show how to use stlink-v3set GPIO APIs.
-For some reason only X works.
+For some reason only GPIO0(pin18) works.
